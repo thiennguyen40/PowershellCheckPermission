@@ -1,0 +1,83 @@
+function Check-RDC{
+    #CHANGE FOR DOMAIN
+    #Remember to change name of exported file
+    #If you need or don't need specfic accounts -> line 26
+    $Domain = $null
+    $Domain = ' '
+
+    $FormatEnumerationLimit = 100
+    $tabname = "ReplicatingDirectoryChanges"
+
+    #Create table
+    $table = New-Object system.Data.DataTable $tabname
+
+    #Create columns
+    $col1 = New-Object system.Data.DataColumn Name,([string])
+    $col2 = New-Object system.Data.DataColumn ReplicatingDirectoryChanges,([string])
+
+    #Insert columns
+    $table.Columns.Add($col1)
+    $table.Columns.Add($col2)
+
+    #Variables
+    $AccountNames = $null
+    $AccountNames = @()
+    #$AccountNames = Import-Csv -Path "U:ServiceAccountAnalysisIO.csv" | Select Name
+    $AccountNames = Get-ADUser -Filter * -Server $Domain -ResultSetSize $null | where {($_.DistinguishedName -match 'Service Accounts') -or ($_.DistinguishedName -match 'Avaya')} | Select Name
+
+    #Check permissions
+    foreach($AccountName in $AccountNames){
+    
+        $row = $table.NewRow()
+        $tempPermissions = $null
+        $tempTargObj = $null
+        $tempTransAccount = $null 
+        $regTargObj = $null
+        $regTransAccount = $null
+        $row.Name = $AccountName -replace"@{Name=","" -replace"}",""
+
+        #Set identity for easy read
+        #$AccountName = "@{Name=RVBD_SERVICE}" #Test ignore
+        $Identity = $row.Name 
+        #$Identity = "RVBD_SERVICE" #Test ignore 
+
+        #Get important attributes 
+        $tempPermissions = Get-QADPermission -Identity $Identity -Inherited -Service $Domain | where {$_.RightsDisplay -match 'Replicating'}
+
+        if($tempPermissions -ne $null){
+            #Check permissions
+            foreach($Permission in $tempPermissions){
+                $tempTargObj = $Permission | Select -ExpandProperty TargetObject 
+                $regTargObj = [RegEx]::Escape($tempTargObj)
+    
+                $tempTransAccount = $Permission | Select -ExpandProperty TransitiveAccount
+                $regTransAccount = [RegEx]::Escape($tempTransAccount)
+    
+                if($regTargObj -like $regTransAccount){
+                    $row.ReplicatingDirectoryChanges = "Yes"
+                    break
+                }
+                else{
+                    $row.ReplicatingDirectoryChanges = "No"
+                }
+            }
+         }
+         else{
+            $row.ReplicatingDirectoryChanges = "No"
+         }
+    
+        <#Test ignore
+        #$Identity
+        #$tempPermissions
+        #$row.Name
+        #$row.ReplicatingDirectoryChanges#>
+
+        $table.Rows.Add($row)
+    }
+
+    #Display or export
+    #$table | Format-Table -AutoSize -Wrap 
+    $table | Export-Csv SelfCheckingReplicatingDirectoryChanges.csv -NoTypeInformation -Force
+}
+
+Check-RDC
